@@ -1,0 +1,301 @@
+\documentclass{beamer}
+\usetheme{Rochester}
+
+\usepackage{fontspec}
+\usepackage{minted}
+\usepackage{relsize}
+\usepackage{tikz}
+
+\usetikzlibrary{calc}
+
+\definecolor{imperialblue}{HTML}{003E74}
+
+\setbeamertemplate{footline}{
+	\hfill%
+	\usebeamercolor[fg]{page number in head/foot}%
+	\usebeamerfont{page number in head/foot}%
+	\setbeamertemplate{page number in head/foot}[framenumber]%
+	\usebeamertemplate*{page number in head/foot}\kern1em\vskip2pt%
+}
+\beamertemplatenavigationsymbolsempty
+\setbeamercolor{structure}{fg=imperialblue}
+
+\usemintedstyle{friendly}
+\setminted{
+	numbers=left, % options: `left`, `right`, `both` or `none`
+	tabsize=2,
+	%fontsize=\footnotesize, % footnotesize is 10pt - WARNING: changes font size of inline code as well
+	numbersep=8pt,
+	xleftmargin=12pt, % appropriate for 1-9 lines...
+}
+
+% pretty numbers
+\renewcommand{\theFancyVerbLine}{%
+	\texttt{%
+		\textcolor{black!50}{%
+			\smaller%
+			%\addfontfeature{Numbers={Monospaced,Lining}}%
+			\arabic{FancyVerbLine}%
+		}%
+	}%
+}
+
+
+\setmonofont[Scale=MatchUppercase]{PragmataPro}
+
+\title{\textsc{KDAlloc}: The KLEE Deterministic Allocator}
+\subtitle{Deterministic Memory Allocation during Symbolic Execution and Test Case Replay}
+\author{\underline{Daniel Schemmel}\textsuperscript{*}, Julian Büning\textsuperscript{\textdagger}, Frank Busse\textsuperscript{*}, Martin Nowack\textsuperscript{*}, Cristian Cadar\textsuperscript{*}}
+\institute{\textsuperscript{*}Imperial College London, \textsuperscript{\textdagger}RWTH Aachen University}
+\date{2023-07-18}
+
+\begin{document}
+
+\begin{frame}
+	\titlepage
+	\begin{tikzpicture}[
+		remember picture,overlay,
+		every node/.style={inner sep=0,outer sep=0},
+	]
+		\path[fill=title.bg] ($(current page.south east) + (-0.2,2.8)$) rectangle ($(current page.south east) + (-2.4,0.3)$);
+		\node[anchor=north east] (qr) at ($(current page.south east) + (-0.3,2.7)$) {\includegraphics[width=2cm]{qr-demo-repo.pdf}};
+		\node[anchor=north,font={\fontsize{7}{7}\selectfont},text=title.fg] at ($(qr.south) - (0,0.1)$) {Try it yourself!};
+	\end{tikzpicture}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Summary \& Conclusion}
+	\begin{itemize}[<+->]
+		\item Memory addresses can impact program execution
+		\item \textsc{KDAlloc}: Cross-run and cross-path deterministic allocation
+		\item Not presented \emph{today}: Spatial and temporal distancing, memory and time efficiency, asan integration demo, \ldots
+		\medskip
+		\item Visit me tomorrow for more examples and everything not covered today!
+	\end{itemize}
+	\begin{tikzpicture}[
+		remember picture,overlay,
+		every node/.style={inner sep=0,outer sep=0},
+	]
+		\path[fill=title.bg] ($(current page.south east) + (-0.2,2.8)$) rectangle ($(current page.south east) + (-2.4,0.3)$);
+		\node[anchor=north east] (qr) at ($(current page.south east) + (-0.3,2.7)$) {\includegraphics[width=2cm]{qr-demo-repo.pdf}};
+		\node[anchor=north,font={\fontsize{7}{7}\selectfont},text=title.fg] at ($(qr.south) - (0,0.1)$) {Try it yourself!};
+	\end{tikzpicture}
+\end{frame}
+
+\begin{frame}
+	\frametitle{A Treap with Concrete Inputs}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+			\inputminted[fontsize={\fontsize{6}{6}\selectfont},linenos=true,lastline=25]{c}{demo-repo/treap-conc.c}
+		\end{column}
+		\begin{column}{0.5\textwidth}
+			\inputminted[fontsize={\fontsize{6}{6}\selectfont},linenos=true,firstline=26]{c}{demo-repo/treap-conc.c}
+		\end{column}
+	\end{columns}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Running Concretely}
+	\begin{minted}[linenos=false]{console}
+		$ clang treap-conc.c -g3 -o treap-conc.exe
+		$ ./treap-conc.exe
+		$ echo $?
+		0
+	\end{minted}
+	\pause%
+	\begin{minted}[linenos=false]{console}
+		$ ./treap-conc.exe
+		treap-conc.exe: treap-conc.c:49: int main(): Assertion
+		`strcmp(root->key, "1") == 0' failed.
+		(core dumped) ./treap.exe
+		$ echo $?
+		134
+	\end{minted}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Running in KLEE}
+	\begin{minted}[linenos=false,fontsize={\fontsize{8}{9}\selectfont}]{console}
+		$ clang treap-conc.c -g3 -c -emit-llvm
+		$ klee --posix-runtime --libc=uclibc treap-conc.bc
+		[...]
+		KLEE: WARNING ONCE: Alignment of memory from call "calloc" is not modelled.
+		Using alignment of 8.
+
+		KLEE: done: total instructions = 14801
+		KLEE: done: completed paths = 1
+		KLEE: done: partially completed paths = 0
+		KLEE: done: generated tests = 1
+	\end{minted}
+	\pause%
+	\begin{minted}[linenos=false,fontsize={\fontsize{8}{9}\selectfont}]{console}
+		$ klee --posix-runtime --libc=uclibc treap-conc.bc
+		[...]
+		KLEE: WARNING ONCE: Alignment of memory from call "calloc" is not modelled.
+		Using alignment of 8.
+		KLEE: ERROR: treap-conc.c:49: ASSERTION FAIL: strcmp(root->key, "1") == 0
+		KLEE: NOTE: now ignoring this error at this location
+
+		KLEE: done: total instructions = 14340
+		KLEE: done: completed paths = 0
+		KLEE: done: partially completed paths = 1
+		KLEE: done: generated tests = 1
+	\end{minted}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Running in KLEE with KDAlloc 1/2}
+	\begin{minted}[linenos=false,fontsize={\fontsize{7}{7}\selectfont}]{console}
+		$ klee --posix-runtime --libc=uclibc --kdalloc treap-conc.bc
+		[...]
+		KLEE: Deterministic allocator: Using quarantine queue size 8
+		KLEE: Deterministic allocator: globals (start-address=0x7f992f600000 size=10 GiB)
+		KLEE: Deterministic allocator: constants (start-address=0x7f96af600000 size=10 GiB)
+		KLEE: Deterministic allocator: heap (start-address=0x7e96af600000 size=1024 GiB)
+		KLEE: Deterministic allocator: stack (start-address=0x7e76af600000 size=128 GiB)
+		KLEE: WARNING ONCE: calling external: syscall(16, 0, 21505, 139093310701568) at
+		/klee-src/runtime/POSIX/fd.c:997 10
+		KLEE: WARNING ONCE: Alignment of memory from call "malloc" is not modelled. Using
+		alignment of 8.
+		KLEE: WARNING ONCE: calling __klee_posix_wrapped_main with extra arguments.
+		KLEE: WARNING ONCE: Alignment of memory from call "calloc" is not modelled. Using
+		alignment of 8.
+		KLEE: ERROR: treap-conc.c:49: ASSERTION FAIL: strcmp(root->key, "1") == 0
+		KLEE: NOTE: now ignoring this error at this location
+
+		KLEE: done: total instructions = 14393
+		KLEE: done: completed paths = 0
+		KLEE: done: partially completed paths = 1
+		KLEE: done: generated tests = 1
+	\end{minted}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Running in KLEE with KDAlloc 2/2}
+	\begin{minted}[linenos=false,fontsize={\fontsize{7}{7}\selectfont}]{console}
+		$ klee --posix-runtime --libc=uclibc --kdalloc treap-conc.bc
+		[...]
+		KLEE: Deterministic allocator: Using quarantine queue size 8
+		KLEE: Deterministic allocator: globals (start-address=0x7fcc56e00000 size=10 GiB)
+		KLEE: Deterministic allocator: constants (start-address=0x7fc9d6e00000 size=10 GiB)
+		KLEE: Deterministic allocator: heap (start-address=0x7ec9d6e00000 size=1024 GiB)
+		KLEE: Deterministic allocator: stack (start-address=0x7ea9d6e00000 size=128 GiB)
+		KLEE: WARNING ONCE: calling external: syscall(16, 0, 21505, 139313016733696) at
+		/klee-src/runtime/POSIX/fd.c:997 10
+		KLEE: WARNING ONCE: Alignment of memory from call "malloc" is not modelled. Using
+		alignment of 8.
+		KLEE: WARNING ONCE: calling __klee_posix_wrapped_main with extra arguments.
+		KLEE: WARNING ONCE: Alignment of memory from call "calloc" is not modelled. Using
+		alignment of 8.
+
+		KLEE: done: total instructions = 14854
+		KLEE: done: completed paths = 1
+		KLEE: done: partially completed paths = 0
+		KLEE: done: generated tests = 1
+	\end{minted}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Running in KLEE with KDAlloc and Fixed Base-Addresses}
+	\begin{minted}[linenos=false,fontsize={\fontsize{7}{7}\selectfont}]{console}
+		$ klee --posix-runtime --libc=uclibc  --kdalloc    \
+			--kdalloc-constants-start-address=0x610000000000 \
+			--kdalloc-globals-start-address=0x620000000000   \
+			--kdalloc-heap-start-address=0x640000000000      \
+			--kdalloc-stack-start-address=0x630000000000     \
+			treap-conc.bc
+		[...]
+		KLEE: Deterministic allocator: Using quarantine queue size 8
+		KLEE: Deterministic allocator: globals (start-address=0x620000000000 size=10 GiB)
+		KLEE: Deterministic allocator: constants (start-address=0x610000000000 size=10 GiB)
+		KLEE: Deterministic allocator: heap (start-address=0x640000000000 size=1024 GiB)
+		KLEE: Deterministic allocator: stack (start-address=0x630000000000 size=128 GiB)
+		KLEE: WARNING ONCE: calling external: syscall(16, 0, 21505, 108896748306432) at /klee-src/runtime/POSIX/fd.c:997 10
+		KLEE: WARNING ONCE: Alignment of memory from call "malloc" is not modelled. Using alignment of 8.
+		KLEE: WARNING ONCE: calling __klee_posix_wrapped_main with extra arguments.
+		KLEE: WARNING ONCE: Alignment of memory from call "calloc" is not modelled. Using alignment of 8.
+		KLEE: ERROR: treap-conc.c:49: ASSERTION FAIL: strcmp(root->key, "1") == 0
+		KLEE: NOTE: now ignoring this error at this location
+
+		KLEE: done: total instructions = 14415
+		KLEE: done: completed paths = 0
+		KLEE: done: partially completed paths = 1
+		KLEE: done: generated tests = 1
+	\end{minted}
+\end{frame}
+
+\begin{frame}
+	\frametitle{A Treap with Symbolic Inputs}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+			\inputminted[fontsize={\fontsize{6}{6}\selectfont},linenos=true,lastline=30]{c}{demo-repo/treap-sym.c}
+		\end{column}
+		\begin{column}{0.5\textwidth}
+			\inputminted[fontsize={\fontsize{6}{6}\selectfont},linenos=true,firstline=31]{c}{demo-repo/treap-sym.c}
+		\end{column}
+	\end{columns}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Replaying Symbolic Execution with KDAlloc}
+	\begin{minted}[linenos=false,fontsize={\fontsize{7}{7}\selectfont}]{console}
+		$ clang treap-sym.c -g3 -c -emit-llvm
+		$ klee --posix-runtime --libc=uclibc --emit-all-errors \
+		  treap-sym.bc --sym-stdin 2
+		[...]
+		$ clang treap-sym.c -g3 -o treap-sym.exe
+		$ klee-replay klee-last/test000002.ktest ./treap-sym.exe
+		[...]
+		KLEE-REPLAY: NOTE: EXIT STATUS: NORMAL (0 seconds)
+		[...]
+	\end{minted}
+	\pause
+	\begin{minted}[linenos=false,fontsize={\fontsize{7}{7}\selectfont}]{console}
+		$ klee-replay klee-last/test000002.ktest ./treap-sym.exe
+		[...]
+		treap-sym.exe: treap-sym.c:59: int main(): Assertion `strcmp(root->key, "1") == 0' failed.
+		KLEE-REPLAY: NOTE: EXIT STATUS: CRASHED signal 6 (0 seconds)
+		[...]
+	\end{minted}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Replaying Symbolic Execution with KDAlloc}
+	\begin{minted}[linenos=false,fontsize={\fontsize{7}{7}\selectfont}]{console}
+		$ klee --posix-runtime --libc=uclibc --emit-all-errors \
+		  --kdalloc                                            \
+			--kdalloc-constants-start-address=0x610000000000     \
+			--kdalloc-globals-start-address=0x620000000000       \
+			--kdalloc-heap-start-address=0x640000000000          \
+			--kdalloc-stack-start-address=0x630000000000         \
+		  treap-sym.bc --sym-stdin 2
+		[...]
+		$ klee-replay klee-last/test000002.ktest ./treap-sym.exe
+		[...]
+		KDAlloc initialized at 0x640000000000 with 1024GiB and quarantine 8
+		treap-sym.exe: treap-sym.c:59: int main(): Assertion `strcmp(root->key, "1") == 0' failed.
+		KLEE-REPLAY: NOTE: EXIT STATUS: CRASHED signal 6 (0 seconds)
+		[...]
+	\end{minted}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Summary \& Conclusion}
+	\begin{itemize}[<+->]
+		\item Memory addresses can impact program execution
+		\item \textsc{KDAlloc}: Cross-run and cross-path deterministic allocation
+		\item Not presented \emph{today}: Spatial and temporal distancing, memory and time efficiency, asan integration demo, \ldots
+		\medskip
+		\item Visit me tomorrow for more examples and everything not covered today!
+	\end{itemize}
+	\begin{tikzpicture}[
+		remember picture,overlay,
+		every node/.style={inner sep=0,outer sep=0},
+	]
+		\path[fill=title.bg] ($(current page.south east) + (-0.2,2.8)$) rectangle ($(current page.south east) + (-2.4,0.3)$);
+		\node[anchor=north east] (qr) at ($(current page.south east) + (-0.3,2.7)$) {\includegraphics[width=2cm]{qr-demo-repo.pdf}};
+		\node[anchor=north,font={\fontsize{7}{7}\selectfont},text=title.fg] at ($(qr.south) - (0,0.1)$) {Try it yourself!};
+	\end{tikzpicture}
+\end{frame}
+
+\end{document}

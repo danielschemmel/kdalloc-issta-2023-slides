@@ -1,0 +1,16 @@
+/_minted-*
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.nav
+*.out
+*.pyg
+*.snm
+*.toc
+*.vrb
+
+/qr-demo-repo.pdf
+/qr-demo-repo.svg
+
+/presentation.pdf
